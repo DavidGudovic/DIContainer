@@ -2,12 +2,22 @@
 
 namespace tests;
 
+use Closure;
 use Container\Container;
 use PHPUnit\Framework\TestCase;
 use Psr\Container\NotFoundExceptionInterface;
 
 class ContainerTest extends TestCase
 {
+
+    public static function singletonsTestProviders(): array
+    {
+        return [
+            ['service', fn () => new TestService()],
+            [TestService::class, fn () => new TestService()],
+            ['arbitrary string', fn () => new TestService()]
+        ];
+    }
 
     protected function setUp(): void
     {
@@ -78,6 +88,19 @@ class ContainerTest extends TestCase
         $this->assertInstanceOf(TestService::class, $user->testService);
     }
 
+    /**
+     * @dataProvider singletonsTestProviders
+     */
+    public function test_it_allows_us_to_register_singletons(string $key, Closure $service ): void
+    {
+        $this->container->singleton($key, $service);
+
+        $this->assertSame(
+          $this->container->get($key),
+          $this->container->get($key)
+        );
+    }
+
 }
 
 class TestService
@@ -115,7 +138,7 @@ class UserBuilder
 class CreateUserAccount
 {
     public function __construct(
-        public User     $user,
+        public User        $user,
         public TestService $testService,
     )
     {
