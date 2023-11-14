@@ -3,6 +3,7 @@
 namespace Container;
 
 use Closure;
+use Container\Exceptions\CouldNotResolveAbstraction;
 use Container\Exceptions\CouldNotResolveClass;
 use JetBrains\PhpStorm\NoReturn;
 use Psr\Container\ContainerInterface;
@@ -39,6 +40,10 @@ class Container implements ContainerInterface
      */
     public function register(string $key, callable|string $callback, bool $singleton = false): static
     {
+        if (is_string($callback) && class_exists($callback)) {
+            $callback = fn() => new $callback();
+        }
+
         $this->services[$key] = $callback;
 
         if ($singleton) {
@@ -50,10 +55,10 @@ class Container implements ContainerInterface
 
     /**
      * @param string $key
-     * @param Closure $callback
+     * @param Closure|string $callback
      * @return $this
      */
-    public function singleton(string $key, Closure $callback): static
+    public function singleton(string $key, Closure|string $callback): static
     {
         return $this->register($key, $callback, true);
     }
@@ -63,32 +68,11 @@ class Container implements ContainerInterface
      * @return mixed
      * @throws ReflectionException
      */
-    public function get(string $id)
+    public function get(string $id): mixed
     {
-        if ($this->has($id)) {
-
-            if(array_key_exists($id, $this->instances) && ! is_null($this->instances[$id])){
-                return $this->instances[$id];
-            }
-
-            $serviceResolver = $this->services[$id];
-
-            $resolvedService = $serviceResolver instanceof Closure
-                ? $serviceResolver()
-                : $serviceResolver;
-
-            if (array_key_exists($id, $this->instances)) {
-                $this->instances[$id] = $resolvedService;
-            }
-
-            return $resolvedService;
-        }
-
-        if (class_exists($id)) {
-            return $this->build($id);
-        }
-
-        throw new CouldNotResolveClass();
+        return $this->has($id)
+            ? $this->fetchBoundService($id)
+            : $this->build($id);
     }
 
     /**
@@ -117,7 +101,7 @@ class Container implements ContainerInterface
      *
      * @param string $service
      * @return object|string|null
-     * @throws ReflectionException
+     * @throws ReflectionException|CouldNotResolveAbstraction
      */
     private function build(string $service): object|string|null
     {
@@ -125,6 +109,10 @@ class Container implements ContainerInterface
             $reflector = new ReflectionClass($service);
         } catch (ReflectionException $e) {
             throw new CouldNotResolveClass();
+        }
+
+        if (!$reflector->isInstantiable()) {
+            throw new CouldNotResolveAbstraction();
         }
 
         $parameters = $reflector->getConstructor()?->getParameters() ?? [];
@@ -139,5 +127,24 @@ class Container implements ContainerInterface
 
 
         return $reflector->newInstanceArgs($resolvedDependencies);
+    }
+
+    protected function fetchBoundService(string $id)
+    {
+        if (array_key_exists($id, $this->instances) && !is_null($this->instances[$id])) {
+            return $this->instances[$id];
+        }
+
+        $serviceResolver = $this->services[$id];
+
+        $resolvedService = $serviceResolver instanceof Closure
+            ? $serviceResolver($this)
+            : $serviceResolver;
+
+        if (array_key_exists($id, $this->instances)) {
+            $this->instances[$id] = $resolvedService;
+        }
+
+        return $resolvedService;
     }
 }

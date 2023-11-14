@@ -4,6 +4,7 @@ namespace tests;
 
 use Closure;
 use Container\Container;
+use Container\Exceptions\CouldNotResolveAbstraction;
 use PHPUnit\Framework\TestCase;
 use Psr\Container\NotFoundExceptionInterface;
 
@@ -16,6 +17,14 @@ class ContainerTest extends TestCase
             ['service', fn () => new TestService()],
             [TestService::class, fn () => new TestService()],
             ['arbitrary string', fn () => new TestService()]
+        ];
+    }
+
+    public static function abstractionErrorProvider(): array
+    {
+        return [
+            [TestInterfaceTwo::class],
+            [TestAbstraction::class]
         ];
     }
 
@@ -101,13 +110,42 @@ class ContainerTest extends TestCase
         );
     }
 
-}
+    public function test_it_binds_implementations_to_interfaces(): void
+    {
+        $this->container->register(TestInterface::class, Implementation::class);
+        $this->assertInstanceOf(Implementation::class, $this->container->get(TestInterface::class));
+    }
 
+    public function test_it_can_bind_implementations_to_interfaces_as_singletons(): void
+    {
+        $this->container->singleton(TestInterface::class, Implementation::class);
+        $this->assertInstanceOf(Implementation::class, $this->container->get(TestInterface::class));
+    }
+
+    /**
+     * @dataProvider abstractionErrorProvider
+     */
+    public function test_it_throws_an_exception_on_interface_instantiation(string $abstraction): void
+    {
+        $this->expectException(CouldNotResolveAbstraction::class);
+        $this->expectExceptionMessage("Could not resolve interface or abstract class");
+        $this->container->get($abstraction);
+    }
+
+    public function test_it_allows_closures_to_access_the_container(): void
+    {
+        $this->container->register('arbitrary_string_', fn (Container $container) => new User($container->get(ORM::class)));
+
+        $this->assertInstanceOf(User::class, $this->container->get('arbitrary_string_'));
+        $this->assertInstanceOf(ORM::class, $this->container->get('arbitrary_string_')->ORM);
+    }
+
+}
+abstract class TestAbstraction {}
 class TestService
 {
 
 }
-
 class User
 {
     public ORM $ORM;
@@ -143,4 +181,16 @@ class CreateUserAccount
     )
     {
     }
+}
+
+interface TestInterface {}
+interface TestInterfaceTwo {}
+
+class Implementation implements TestInterface {}
+
+class ImplementationConsumer
+{
+    public function __construct(
+        public TestInterface $interface,
+    ){}
 }
